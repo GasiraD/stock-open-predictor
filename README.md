@@ -1,4 +1,4 @@
-train.csv = [Google](https://drive.google.com/file/d/1YiLYhXSbPUZlWyPsejF3sZPjtjWp0QcI/view)
+train.csv = [train.csv](https://drive.google.com/file/d/1YiLYhXSbPUZlWyPsejF3sZPjtjWp0QcI/view)
 
 >복잡한 모델
 
@@ -13,9 +13,10 @@ batch_size = 64
 
 ```
 
+>간단한 모델
+
 ```python
 
->간단한 모델
 num_layers = 1
 size_layer = 32
 epoch = 50
