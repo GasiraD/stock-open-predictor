@@ -4,10 +4,9 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from datetime import datetime, timedelta
+from sklearn.metrics import mean_squared_error
+from math import sqrt
 
-# import seaborn as sns
-# from tensorflow.keras.models import Sequential
-# from tensorflow.keras.layers import LSTM, Dense
 
 
 #하이퍼 파라미터
@@ -18,10 +17,9 @@ num_layers = 1
 size_layer = 32
 epoch = 50
 dropout_rate = 0.5
-time_step = 60
+time_step = 30
 batch_size = 16
-
-
+train_size = 0.7
 
 
 # 1. 데이터 읽기 및 필터링
@@ -44,7 +42,7 @@ open_scaled = scaler.fit_transform(open)
 
 
 # 3. 테스트 데이터 분할
-train_size = int(len(open_scaled) * 0.7)
+train_size = int(len(open_scaled) * train_size)
 train_data, test_data = open_scaled[:train_size], open_scaled[train_size:]
 
 
@@ -65,11 +63,6 @@ X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
 X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
 
 
-# print(f'X_train shape: {X_train}')
-# print(f'y_train shape: {y_train}')
-# print(f'X_test shape: {X_test}')
-# print(f'y_test shape: {y_test}')
-
 # 7. LSTM 모델 정의
 
 model = tf.keras.models.Sequential()
@@ -86,8 +79,31 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 history = model.fit(X_train, y_train, epochs=epoch, batch_size=batch_size, validation_split=0.1)
 
 # 9. 모델 평가
+
+# 9.1 loss 평가
 loss = model.evaluate(X_test, y_test)
 print(f'Test loss: {loss}')
+
+# 9.2 rmse 평가
+train_predictions = model.predict(X_train)
+test_predictions = model.predict(X_test)
+train_predictions = scaler.inverse_transform(train_predictions)
+y_train_unscaled = scaler.inverse_transform(y_train.reshape(-1, 1)).flatten()
+test_predictions = scaler.inverse_transform(test_predictions)
+y_test_unscaled = scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+
+# RMSE 계산 함수
+def calculate_rmse(y_true, y_pred):
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = sqrt(mse)
+    return rmse
+
+# RMSE 계산
+train_rmse = calculate_rmse(y_train_unscaled, train_predictions.flatten())
+test_rmse = calculate_rmse(y_test_unscaled, test_predictions.flatten())
+
+print(f'Training RMSE: {train_rmse:.4f}')
+print(f'Testing RMSE: {test_rmse:.4f}')
 
 
 # 10. 예측 및 결과 시각화
