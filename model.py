@@ -1,155 +1,106 @@
-import sys
-import warnings
+import matplotlib.pyplot as plt
 import tensorflow as tf
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
-from datetime import datetime
-from datetime import timedelta
-from tqdm import tqdm
+from datetime import datetime, timedelta
 
-sns.set()
-tf.compat.v1.random.set_random_seed(1234)
+# import seaborn as sns
+# from tensorflow.keras.models import Sequential
+# from tensorflow.keras.layers import LSTM, Dense
 
 
+#하이퍼 파라미터
 company_name = "SAMYANG CORPORATION"
 
 
+num_layers = 1
+size_layer = 32
+epoch = 50
+dropout_rate = 0.5
+time_step = 60
+batch_size = 16
+
+
+
+
+# 1. 데이터 읽기 및 필터링
 df = pd.read_csv('train.csv')
 df = df[df['Company_Name'] == company_name]
-df.dropna(inplace=True)
-
 df['Date'] = pd.to_datetime(df['Date'])
 df = df.sort_values(by='Date')
-
-minmax = MinMaxScaler().fit(df[['Open']].astype('float32'))
-df_log = minmax.transform(df[['Open']].astype('float32'))
-df_log = pd.DataFrame(df_log)
-
-# minmax = MinMaxScaler().fit(df.iloc[:, -9:-8].astype('float32')) # open index
-# df_log = minmax.transform(df.iloc[:, -9:-8].astype('float32')) # open index
-# df_log = pd.DataFrame(df_log)
+df.dropna(inplace=True)
 
 
+# 1.5 테스트용 임시 수정
+# df = df.head(365)
 
 
-simulation_size = 1 #10
-num_layers = 1
-size_layer = 32 #128
-timestamp = 1 #5
-epoch = 10 #300
-dropout_rate = 0.8
-test_size = 10
-learning_rate = 0.01
-
-df_train = df_log
-df.shape, df_train.shape
+# 2. 데이터 선택 및 정규화
+open = df['Open'].values.reshape(-1, 1)
+scaler = MinMaxScaler(feature_range=(0, 1))
+open_scaled = scaler.fit_transform(open)
 
 
 
+# 3. 테스트 데이터 분할
+train_size = int(len(open_scaled) * 0.7)
+train_data, test_data = open_scaled[:train_size], open_scaled[train_size:]
 
-class Model(tf.keras.Model):
-    def __init__(self, num_layers, size_layer, dropout_rate):
-        super(Model, self).__init__()
-        self.lstm_layers = [tf.keras.layers.LSTM(size_layer, return_sequences=True, dropout=dropout_rate) for _ in range(num_layers)]
-        self.dense = tf.keras.layers.Dense(1)
-    
-    def call(self, inputs, training=False):
-        x = inputs
-        for layer in self.lstm_layers:
-            x = layer(x, training=training)
-        return self.dense(x[:, -1, :])  # return the last output
 
-def calculate_accuracy(real, predict):
-    real = np.array(real) + 1
-    predict = np.array(predict) + 1
-    percentage = 1 - np.sqrt(np.mean(np.square((real - predict) / real)))
-    return percentage * 100
+def create_dataset(data, time_step=1):
+    X, y = [], []
+    for i in range(len(data) - time_step - 1):
+        X.append(data[i:(i + time_step), 0])
+        y.append(data[i + time_step, 0])
+    return np.array(X), np.array(y)
 
-def anchor(signal, weight):
-    buffer = []
-    last = signal[0]
-    for i in signal:
-        smoothed_val = last * weight + (1 - weight) * i
-        buffer.append(smoothed_val)
-        last = smoothed_val
-    return buffer
+# 5. 시계열 데이터 준비
+X_train, y_train = create_dataset(train_data, time_step)
+X_test, y_test = create_dataset(test_data, time_step)
 
-def forecast():
-    modelnn = Model(num_layers=num_layers, size_layer=size_layer, dropout_rate=dropout_rate)
-    modelnn.compile(optimizer=tf.keras.optimizers.Adam(learning_rate), loss='mse')
 
-    date_ori = pd.to_datetime(df['Date']).tolist()
+# 6. 데이터 형태 변경 (LSTM 입력 형태에 맞게)
+X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
+X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
 
-    pbar = tqdm(range(epoch), desc='train loop')
-    for i in pbar:
-        total_loss, total_acc = [], []
-        for k in range(0, df_train.shape[0] - 1, timestamp):
-            index = min(k + timestamp, df_train.shape[0] - 1)
-            batch_x = np.expand_dims(df_train.iloc[k : index, :].values, axis=0)
-            batch_y = df_train.iloc[k + 1 : index + 1, :].values
 
-            with tf.GradientTape() as tape:
-                logits = modelnn(batch_x, training=True)
-                loss = tf.reduce_mean(tf.square(batch_y - logits))
-            
-            grads = tape.gradient(loss, modelnn.trainable_variables)
-            modelnn.optimizer.apply_gradients(zip(grads, modelnn.trainable_variables))
-            
-            total_loss.append(loss.numpy())
-            total_acc.append(calculate_accuracy(batch_y[:, 0], logits.numpy()[:, 0]))
-        
-        pbar.set_postfix(cost=np.mean(total_loss), acc=np.mean(total_acc))
-    
-    future_day = test_size
-    output_predict = np.zeros((df_train.shape[0] + future_day, df_train.shape[1]))
-    output_predict[0] = df_train.iloc[0]
+# print(f'X_train shape: {X_train}')
+# print(f'y_train shape: {y_train}')
+# print(f'X_test shape: {X_test}')
+# print(f'y_test shape: {y_test}')
 
-    for k in range(0, df_train.shape[0] - timestamp, timestamp):
-        batch_x = np.expand_dims(df_train.iloc[k : k + timestamp, :].values, axis=0)
-        logits = modelnn(batch_x, training=False)
-        output_predict[k + 1 : k + timestamp + 1] = logits.numpy()
-    
-    future_inputs = np.expand_dims(df_train.iloc[-timestamp:, :].values, axis=0)
-    for i in range(future_day):
-        logits = modelnn(future_inputs, training=False)
-        output_predict[-future_day + i] = logits.numpy()[-1]
-        future_inputs = np.roll(future_inputs, shift=-1, axis=1)
-        future_inputs[0, -1, :] = logits.numpy()[-1]
-    
-    output_predict = minmax.inverse_transform(output_predict)
-    deep_future = anchor(output_predict[:, 0], 0.4)
-    
-    return deep_future
+# 7. LSTM 모델 정의
 
-results = []
-for i in range(simulation_size):
-    print('simulation %d' % (i + 1))
-    results.append(forecast())
+model = tf.keras.models.Sequential()
+for _ in range(num_layers):
+    model.add(tf.keras.layers.LSTM(size_layer, return_sequences=True, input_shape=(X_train.shape[1], 1)))
+    model.add(tf.keras.layers.Dropout(dropout_rate))
 
-date_ori = pd.to_datetime(df['Date']).tolist()
-for i in range(test_size):
-    date_ori.append(date_ori[-1] + timedelta(days=1))
-date_ori = pd.Series(date_ori).dt.strftime(date_format='%Y-%m-%d').tolist()
+model.add(tf.keras.layers.LSTM(size_layer))
+model.add(tf.keras.layers.Dropout(dropout_rate))
+model.add(tf.keras.layers.Dense(1))
 
-accepted_results = []
-for r in results:
-    if (np.array(r[-test_size:]) < np.min(df['Open'])).sum() == 0 and \
-    (np.array(r[-test_size:]) > np.max(df['Open']) * 2).sum() == 0:
-        accepted_results.append(r)
+model.compile(optimizer='adam', loss='mean_squared_error')
 
-accuracies = [calculate_accuracy(df['Open'].values, r[:-test_size]) for r in accepted_results]
+history = model.fit(X_train, y_train, epochs=epoch, batch_size=batch_size, validation_split=0.1)
 
-plt.figure(figsize=(15, 5))
-for no, r in enumerate(accepted_results):
-    plt.plot(r, label='forecast %d' % (no + 1))
-plt.plot(df['Open'], label='true trend', c='black')
+# 9. 모델 평가
+loss = model.evaluate(X_test, y_test)
+print(f'Test loss: {loss}')
+
+
+# 10. 예측 및 결과 시각화
+predictions = model.predict(X_test)
+predictions = scaler.inverse_transform(predictions)
+y_test = scaler.inverse_transform(y_test.reshape(-1, 1))
+
+plt.figure(figsize=(12, 6))
+plt.plot(df['Date'].iloc[-len(y_test):], y_test, color='blue', label='Actual Prices')
+plt.plot(df['Date'].iloc[-len(predictions):], predictions, color='red', label='Predicted Prices')
+plt.xlabel('Date')
+plt.ylabel('Price')
+plt.title(f'{company_name} Price Prediction')
 plt.legend()
-plt.title('average accuracy: %.4f' % (np.mean(accuracies)))
-
-x_range_future = np.arange(len(results[0]))
-plt.xticks(x_range_future[::30], date_ori[::30])
-
 plt.show()
+
