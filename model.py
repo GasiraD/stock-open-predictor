@@ -119,3 +119,4 @@ plt.title(f'{company_name} Price Prediction')
 plt.legend()
 plt.show()
 
+
